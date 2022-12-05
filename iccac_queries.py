@@ -26,36 +26,7 @@ def aimd_premature_loss(variables, timeout=60):
 
     s, v = make_solver(c)
 
-    # Start with zero loss and zero queue, so CCAC is forced to generate an
-    # example trace *from scratch* showing how bad behavior can happen in a
-    # network that was perfectly normal to begin with
-    s.add(v.L[0] == 0)
-    # Restrict alpha to small values, otherwise CCAC can output obvious and
-    # uninteresting behavior
-    s.add(v.alpha <= 0.1 * c.C * c.R)
-
-    # Does there exist a time where loss happened while cwnd <= 1?
-    conds = []
-    for t in range(2, c.T - 1):
-        conds.append(
-            And(
-                v.c_f[0][t] <= 2,
-                v.Ld_f[0][t + 1] - v.Ld_f[0][t] >=
-                1,  # Burst due to loss detection
-                v.S[t + 1 - c.R] - v.S[t - c.R] >=
-                c.C + 1,  # Burst of BDP acks
-                v.A[t + 1] >=
-                v.A[t] + 2,  # Sum of the two bursts
-                v.L[t+1] > v.L[t]
-            ))
-
-    # We don't want an example with timeouts
-    for t in range(c.T):
-        s.add(Not(v.timeout_f[0][t]))
-
-    s.add(Or(*conds))
-    s.add((v.aimd_factor == 2.0))
-
+    add_aimd_constraints(c, s, v)
 
     print(s.to_smt2(), file = open("/tmp/aimd_premature_loss.smt2", "w"))
 
@@ -78,13 +49,13 @@ def aimd_premature_loss(variables, timeout=60):
             upper_bounds[var] = (qres.v.__dict__[var], qres.v.__dict__[var])
             finding_lower = True
             finding_upper = True
+
             # s_lower = s.translate(Context())
             # s_lower.add(v.__dict__[var] < 0)
             # qres = run_query(c, s_lower, v, timeout)
             # print(qres.satisfiable)
             # qres = run_query(c, s, v, timeout)
             # print(qres.satisfiable)
-
 
             # print(s.assertion_list)
             # s.add(v.__dict__[var] < 0)
@@ -102,27 +73,32 @@ def aimd_premature_loss(variables, timeout=60):
 
             #find lower bound
             while finding_lower:
-                s_lower = s.translate(Context())
+                s_lower, v_lower = make_solver(c)
+                add_aimd_constraints(c, s_lower, v_lower)
                 upper, lower = lower_bounds[var]
-                s_lower.add(v.__dict__[var] < lower)
+                print(lower)
+                s_lower.add(v_lower.__dict__[var] < lower)
                 lower_bounds[var] = (lower, (lower-lower))
-                qres = run_query(c, s, v, timeout)
+                qres = run_query(c, s_lower, v_lower, timeout)
                 print(qres.satisfiable)
                 if qres.satisfiable != "sat":
+                    print(lower_bounds[var])
                     finding_lower = False
 
-                # find upper bound
+            # find upper bound
             while finding_upper:
-                s_upper = s.translate(Context())
+                s_upper, v_upper = make_solver(c)
+                add_aimd_constraints(c, s_upper, v_upper)
                 lower, upper = upper_bounds[var]
-                s_upper.add(v.__dict__[var] > upper)
-                lower_bounds[var] = (upper, (upper + upper))
-                qres = run_query(c, s, v, timeout)
+                print(lower)
+                s_upper.add(v_upper.__dict__[var] > upper)
+                upper_bounds[var] = (upper, (upper + upper))
+                qres = run_query(c, s_upper, v_upper, timeout)
                 print(qres.satisfiable)
                 if qres.satisfiable != "sat":
                     finding_upper = False
 
-            print((lower_bounds[var][0], upper_bounds[var][0]))
+            print((lower_bounds[var][1], upper_bounds[var][1]))
 
     # keeps finding discrete new solutions
     # while not end_runs:
@@ -151,6 +127,36 @@ def aimd_premature_loss(variables, timeout=60):
     # if str(qres.satisfiable) == "sat":
         #plot_model(qres.model, c, qres.v)
 
+def add_aimd_constraints(c, s, v):
+    # Start with zero loss and zero queue, so CCAC is forced to generate an
+    # example trace *from scratch* showing how bad behavior can happen in a
+    # network that was perfectly normal to begin with
+    s.add(v.L[0] == 0)
+    # Restrict alpha to small values, otherwise CCAC can output obvious and
+    # uninteresting behavior
+    s.add(v.alpha <= 0.1 * c.C * c.R)
+
+    # Does there exist a time where loss happened while cwnd <= 1?
+    conds = []
+    for t in range(2, c.T - 1):
+        conds.append(
+            And(
+                v.c_f[0][t] <= 2,
+                v.Ld_f[0][t + 1] - v.Ld_f[0][t] >=
+                1,  # Burst due to loss detection
+                v.S[t + 1 - c.R] - v.S[t - c.R] >=
+                c.C + 1,  # Burst of BDP acks
+                v.A[t + 1] >=
+                v.A[t] + 2,  # Sum of the two bursts
+                v.L[t + 1] > v.L[t]
+            ))
+
+    # We don't want an example with timeouts
+    for t in range(c.T):
+        s.add(Not(v.timeout_f[0][t]))
+
+    s.add(Or(*conds))
+    s.add((v.aimd_factor == 2.0))
 
 def helper(l, s, left, right, sol):
     if type(sol) != list:
