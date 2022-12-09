@@ -45,60 +45,50 @@ def aimd_premature_loss(variables, timeout=60):
     print(qres.satisfiable)
     if qres.satisfiable == "sat":
         for var in variables:
-            lower_bounds[var]  = (qres.v.__dict__[var], qres.v.__dict__[var])
-            upper_bounds[var] = (qres.v.__dict__[var], qres.v.__dict__[var])
+            lower_bounds[var]  = (qres.v.__dict__[var] - qres.v.__dict__[var], qres.v.__dict__[var])
+            upper_bounds[var] = (qres.v.__dict__[var], qres.v.__dict__[var] + qres.v.__dict__[var])
             finding_lower = True
             finding_upper = True
 
-            # s_lower = s.translate(Context())
-            # s_lower.add(v.__dict__[var] < 0)
-            # qres = run_query(c, s_lower, v, timeout)
-            # print(qres.satisfiable)
-            # qres = run_query(c, s, v, timeout)
-            # print(qres.satisfiable)
-
-            # print(s.assertion_list)
-            # s.add(v.__dict__[var] < 0)
-            # s.push()
-            # print("_______")
-            # print(s.assertion_list)
-            # qres = run_query(c, s, v, timeout)
-            # print(qres.satisfiable)
-            # s.assertion_list.pop()
-            # print("2_______")
-            # print(s.assertion_list)
-            # qres = run_query(c, s, v, timeout)
-            # print(qres.satisfiable)
-            # break
-
             #find lower bound
+            s_lower, v_lower = make_solver(c)
+            add_aimd_constraints(c, s_lower, v_lower)
             while finding_lower:
-                s_lower, v_lower = make_solver(c)
-                add_aimd_constraints(c, s_lower, v_lower)
-                upper, lower = lower_bounds[var]
+                lower, upper = lower_bounds[var]
                 print(lower)
                 s_lower.add(v_lower.__dict__[var] < lower)
-                lower_bounds[var] = (lower, (lower-lower))
                 qres = run_query(c, s_lower, v_lower, timeout)
                 print(qres.satisfiable)
                 if qres.satisfiable != "sat":
-                    print(lower_bounds[var])
                     finding_lower = False
+                else:
+                    if lower == 0:
+                        lower_bounds[var] = (-last_lower, lower)
+                    else:
+                        lower_bounds[var] = ((lower-lower), lower)
+                    if lower-lower == 0:
+                        last_lower = lower
 
             # find upper bound
+            s_upper, v_upper = make_solver(c)
+            add_aimd_constraints(c, s_upper, v_upper)
             while finding_upper:
-                s_upper, v_upper = make_solver(c)
-                add_aimd_constraints(c, s_upper, v_upper)
                 lower, upper = upper_bounds[var]
-                print(lower)
+                print(upper)
                 s_upper.add(v_upper.__dict__[var] > upper)
-                upper_bounds[var] = (upper, (upper + upper))
                 qres = run_query(c, s_upper, v_upper, timeout)
                 print(qres.satisfiable)
                 if qres.satisfiable != "sat":
                     finding_upper = False
+                else:
+                    upper_bounds[var] = (upper, (upper + upper))
 
-            print((lower_bounds[var][1], upper_bounds[var][1]))
+            print((lower_bounds[var][0], upper_bounds[var][1]))
+            # narrowing down on lower bound:
+            print(binary_check_lower_bound(c, var, lower_bounds[var][0], lower_bounds[var][1], 5, timeout))
+            # narrowing down on upper bound:
+            print(binary_check_upper_bound(c, var, upper_bounds[var][0], upper_bounds[var][1], 5, timeout))
+
 
     # keeps finding discrete new solutions
     # while not end_runs:
@@ -126,6 +116,59 @@ def aimd_premature_loss(variables, timeout=60):
     #     print(k)
     # if str(qres.satisfiable) == "sat":
         #plot_model(qres.model, c, qres.v)
+
+
+def binary_check_lower_bound(c, var, low, high, max_iter, timeout):
+    print("starting binary check")
+    count = 0
+    res = [low, high]
+    s, v = make_solver(c)
+    add_aimd_constraints(c, s, v)
+    s.add(v.__dict__[var] < high)
+    while high >= low and count < max_iter:
+        mid = (high + low) / 2
+        s.add(v.__dict__[var] < mid)
+        qres = run_query(c, s, v, timeout)
+        print(qres.satisfiable)
+        if qres.satisfiable == "sat":
+            res[1] = mid
+            high = mid
+        else:
+            res[0] = mid
+            low = mid
+            s, v = make_solver(c)
+            add_aimd_constraints(c, s, v)
+            s.add(v.__dict__[var] < high)
+
+        count += 1
+    else:
+        return res
+
+def binary_check_upper_bound(c, var, low, high, max_iter, timeout):
+    print("starting upper binary check")
+    count = 0
+    res = [low, high]
+    s, v = make_solver(c)
+    add_aimd_constraints(c, s, v)
+    s.add(v.__dict__[var] > low)
+    while high >= low and count < max_iter:
+        mid = (high + low) / 2
+        s.add(v.__dict__[var] > mid)
+        qres = run_query(c, s, v, timeout)
+        print(qres.satisfiable)
+        if qres.satisfiable == "sat":
+            res[0] = mid
+            low = mid
+        else:
+            res[1] = mid
+            high = mid
+            s, v = make_solver(c)
+            add_aimd_constraints(c, s, v)
+            s.add(v.__dict__[var] > low)
+
+        count += 1
+    else:
+        return res
 
 def add_aimd_constraints(c, s, v):
     # Start with zero loss and zero queue, so CCAC is forced to generate an
