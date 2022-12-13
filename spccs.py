@@ -7,6 +7,9 @@ from pyz3_utils import MySolver, run_query
 from utils import make_periodic
 from variables import VariableNames
 import math
+import matplotlib.pyplot as plt
+
+#run using CLI python3 spccs.py --cmnd aimd_premature_loss --vars alpha
 
 def aimd_premature_loss(variables, timeout=60):
     '''Finds a case where AIMD bursts 2 BDP packets where buffer size = 2 BDP and
@@ -42,7 +45,6 @@ def aimd_premature_loss(variables, timeout=60):
     upper_bounds = {}
 
     qres = run_query(c, s, v, timeout)
-    print(qres.satisfiable)
     if qres.satisfiable == "sat":
         for var in variables:
             lower_bounds[var]  = (qres.v.__dict__[var] - qres.v.__dict__[var], qres.v.__dict__[var])
@@ -85,10 +87,15 @@ def aimd_premature_loss(variables, timeout=60):
 
             print((lower_bounds[var][0], upper_bounds[var][1]))
             # narrowing down on lower bound:
-            print(binary_check_lower_bound(c, var, lower_bounds[var][0], lower_bounds[var][1], 5, timeout))
+            lower_interval = binary_check_lower_bound(c, var, lower_bounds[var][0], lower_bounds[var][1], 5, timeout)
             # narrowing down on upper bound:
-            print(binary_check_upper_bound(c, var, upper_bounds[var][0], upper_bounds[var][1], 5, timeout))
-
+            upper_interval = binary_check_upper_bound(c, var, upper_bounds[var][0], upper_bounds[var][1], 5, timeout)
+            print("Interval for lower bound:")
+            print(lower_interval)
+            print("Interval for upper bound:")
+            print(upper_interval)
+    else:
+        print("unsatisfiable network conditions")
 
     # keeps finding discrete new solutions
     # while not end_runs:
@@ -141,8 +148,7 @@ def binary_check_lower_bound(c, var, low, high, max_iter, timeout):
             s.add(v.__dict__[var] < high)
 
         count += 1
-    else:
-        return res
+    return res
 
 def binary_check_upper_bound(c, var, low, high, max_iter, timeout):
     print("starting upper binary check")
@@ -167,8 +173,7 @@ def binary_check_upper_bound(c, var, low, high, max_iter, timeout):
             s.add(v.__dict__[var] > low)
 
         count += 1
-    else:
-        return res
+    return res
 
 def add_aimd_constraints(c, s, v):
     # Start with zero loss and zero queue, so CCAC is forced to generate an
