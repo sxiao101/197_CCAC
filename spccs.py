@@ -44,11 +44,15 @@ def aimd_premature_loss(variables, timeout=60):
     lower_bounds = {}
     upper_bounds = {}
 
+    lower_bound_history = []
+    upper_bound_history = []
     qres = run_query(c, s, v, timeout)
     if qres.satisfiable == "sat":
         for var in variables:
             lower_bounds[var]  = (qres.v.__dict__[var] - qres.v.__dict__[var], qres.v.__dict__[var])
             upper_bounds[var] = (qres.v.__dict__[var], qres.v.__dict__[var] + qres.v.__dict__[var])
+            lower_bound_history.append(lower_bounds[var])
+            upper_bound_history.append(upper_bounds[var])
             finding_lower = True
             finding_upper = True
 
@@ -68,6 +72,7 @@ def aimd_premature_loss(variables, timeout=60):
                         lower_bounds[var] = (-last_lower, lower)
                     else:
                         lower_bounds[var] = ((lower-lower), lower)
+                    lower_bound_history.append(lower_bounds[var])
                     if lower-lower == 0:
                         last_lower = lower
 
@@ -84,16 +89,22 @@ def aimd_premature_loss(variables, timeout=60):
                     finding_upper = False
                 else:
                     upper_bounds[var] = (upper, (upper + upper))
+                    upper_bound_history.append(upper_bounds[var])
 
             print((lower_bounds[var][0], upper_bounds[var][1]))
             # narrowing down on lower bound:
-            lower_interval = binary_check_lower_bound(c, var, lower_bounds[var][0], lower_bounds[var][1], 5, timeout)
+            lower_interval = binary_check_lower_bound(c, var, lower_bounds[var][0], lower_bounds[var][1], 5, timeout, lower_bound_history)
             # narrowing down on upper bound:
-            upper_interval = binary_check_upper_bound(c, var, upper_bounds[var][0], upper_bounds[var][1], 5, timeout)
+            upper_interval = binary_check_upper_bound(c, var, upper_bounds[var][0], upper_bounds[var][1], 5, timeout, upper_bound_history)
             print("Interval for lower bound:")
             print(lower_interval)
             print("Interval for upper bound:")
             print(upper_interval)
+            print("Lower History")
+            print(lower_bound_history)
+            print("Upper History")
+            print(upper_bound_history)
+
     else:
         print("unsatisfiable network conditions")
 
@@ -125,7 +136,7 @@ def aimd_premature_loss(variables, timeout=60):
         #plot_model(qres.model, c, qres.v)
 
 
-def binary_check_lower_bound(c, var, low, high, max_iter, timeout):
+def binary_check_lower_bound(c, var, low, high, max_iter, timeout, history):
     print("starting binary check")
     count = 0
     res = [low, high]
@@ -140,9 +151,11 @@ def binary_check_lower_bound(c, var, low, high, max_iter, timeout):
         if qres.satisfiable == "sat":
             res[1] = mid
             high = mid
+            history.append((low, high))
         else:
             res[0] = mid
             low = mid
+            history.append((low, high))
             s, v = make_solver(c)
             add_aimd_constraints(c, s, v)
             s.add(v.__dict__[var] < high)
@@ -150,7 +163,7 @@ def binary_check_lower_bound(c, var, low, high, max_iter, timeout):
         count += 1
     return res
 
-def binary_check_upper_bound(c, var, low, high, max_iter, timeout):
+def binary_check_upper_bound(c, var, low, high, max_iter, timeout, history):
     print("starting upper binary check")
     count = 0
     res = [low, high]
@@ -165,9 +178,11 @@ def binary_check_upper_bound(c, var, low, high, max_iter, timeout):
         if qres.satisfiable == "sat":
             res[0] = mid
             low = mid
+            history.append((low, high))
         else:
             res[1] = mid
             high = mid
+            history.append((low, high))
             s, v = make_solver(c)
             add_aimd_constraints(c, s, v)
             s.add(v.__dict__[var] > low)
